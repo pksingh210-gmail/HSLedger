@@ -97,16 +97,17 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
 
     rename_map = {
         "date": "Date",
-        "transaction_id": "TransactionID",
+        "transactionid": "TransactionID",
         "description": "Description",
         "debit": "Debit",
         "credit": "Credit",
-        "bank_name": "Bank",
-        "account_number": "Account",
+        "bank": "Bank",
+        "accountnumber": "Account",
         "classification": "Classification",
         "pairid": "PairID"
     }
     df = df.rename(columns=rename_map)
 
     return df
+
 
