@@ -1,4 +1,3 @@
-# frontend/app.py
 import streamlit as st
 import os
 import sys
@@ -22,6 +21,23 @@ from auth.auth_json_module import auth_ui
 # --- Streamlit config ---
 st.set_page_config(page_title="HSLedger", layout="wide")
 
+# --- Load external CSS ---
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+local_css(os.path.join("frontend", "static", "css", "style.css"))
+
+# --- Header section ---
+st.markdown(
+    """
+    <div class="header-bar">
+        <div class="header-title">HSLedger - Reconciliation & Analysis</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- Clear session on first load ---
 if "initialized" not in st.session_state:
     st.session_state.clear()
@@ -41,9 +57,6 @@ if not st.session_state.get("logged_in", False):
     auth_ui()
     st.stop()
 
-# --- Main title ---
-st.title("HSLedger - Reconciliation & Analysis")
-
 # --- Navigation ---
 tab = navbar.render_navbar()
 
@@ -57,3 +70,4 @@ else:
         Navigate using the top menu to Reconciliation or Trading.
         """
     )
+
