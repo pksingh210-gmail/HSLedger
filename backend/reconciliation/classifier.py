@@ -86,8 +86,8 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
     # Step 6: Final clean + ordering
     # -------------------------------
     required_final = [
-        "date", "transaction_id", "description",
-        "debit", "credit", "bank_name", "account_number",
+        "date", "transactionid", "description",
+        "debit", "credit", "bank", "accountnumber",
         "classification", "pairid"
     ]
     for col in required_final:
@@ -109,3 +109,4 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
     df = df.rename(columns=rename_map)
 
     return df
+
