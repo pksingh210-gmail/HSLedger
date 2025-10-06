@@ -1,4 +1,5 @@
 import pandas as pd
+import re
 from backend.utils.date_utils import parsedate
 from backend.utils.logger import logger
 
@@ -117,6 +118,40 @@ def _match_column_case_insensitive(df, col_name):
 
 
 # ------------------------
+# Amount Cleaning Helper
+# ------------------------
+def clean_amount(value):
+    """
+    Cleans and converts amount strings to floats.
+    Handles $, parentheses, commas, and $(...) formats.
+    Examples:
+      '$123.45'   -> 123.45
+      '($123.45)' -> -123.45
+      '$(123.45)' -> -123.45
+      '(123.45)'  -> -123.45
+      '123.45'    -> 123.45
+    """
+    if pd.isna(value):
+        return 0.0
+
+    val = str(value).strip()
+    if val == "" or val.lower() in ["na", "null", "none"]:
+        return 0.0
+
+    # Check if value should be negative
+    is_negative = "(" in val and ")" in val
+
+    # Remove $, commas, parentheses, and spaces
+    val = re.sub(r"[^0-9.\-]", "", val)
+
+    try:
+        num = float(val)
+        return -num if is_negative else num
+    except ValueError:
+        return 0.0
+
+
+# ------------------------
 # Normalizer Function
 # ------------------------
 def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str) -> pd.DataFrame:
@@ -127,7 +162,7 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     if df is None or df.empty:
         return pd.DataFrame(columns=[
             "transactionid", "date", "bsb", "accountnumber", "description",
-            "debit", "credit", "balance", "type", "reference", "bank", "accounttype"
+            "debit", "credit", "balance", "type", "reference", "bank_name", "accounttype"
         ])
 
     df_local = df.copy()
@@ -185,19 +220,20 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     df_out["accountnumber"] = account_number
     df_out["description"] = df_local[desc_col] if desc_col else None
 
-    # Debit / Credit / Amount
+    # Debit / Credit / Amount (with cleaning)
     if debit_col and credit_col:
-        df_out["debit"] = pd.to_numeric(df_local[debit_col], errors="coerce").fillna(0)
-        df_out["credit"] = pd.to_numeric(df_local[credit_col], errors="coerce").fillna(0)
+        df_out["debit"] = df_local[debit_col].apply(clean_amount)
+        df_out["credit"] = df_local[credit_col].apply(clean_amount)
     elif amount_col:
-        df_out["debit"] = pd.to_numeric(df_local[amount_col], errors="coerce").apply(lambda x: abs(x) if x < 0 else 0)
-        df_out["credit"] = pd.to_numeric(df_local[amount_col], errors="coerce").apply(lambda x: x if x > 0 else 0)
+        df_out["amount"] = df_local[amount_col].apply(clean_amount)
+        df_out["debit"] = df_out["amount"].apply(lambda x: abs(x) if x < 0 else 0)
+        df_out["credit"] = df_out["amount"].apply(lambda x: x if x > 0 else 0)
     else:
         df_out["debit"], df_out["credit"] = 0, 0
 
     # Balance
     if balance_col:
-        df_out["balance"] = pd.to_numeric(df_local[balance_col], errors="coerce")
+        df_out["balance"] = df_local[balance_col].apply(clean_amount)
     else:
         df_out["balance"] = None
 
@@ -208,5 +244,3 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     df_out["accounttype"] = None
 
     return df_out
-
-
