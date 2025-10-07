@@ -252,10 +252,10 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
 
     df_out = pd.DataFrame()
     df_out["transactionid"] = df_local.index.astype(str)
-    df_out["date"] = (
-        df_local[date_col].apply(parsedate).dt.strftime("%d/%m/%Y")
-        if date_col else None
-    )
+    if date_col:
+        df_out["date"] = pd.to_datetime(df_local[date_col], dayfirst=True, errors="coerce").dt.strftime("%d/%m/%Y")
+    else:
+        df_out["date"] = None 
     df_out["bsb"] = None
     df_out["accountnumber"] = account_number
     df_out["description"] = df_local[desc_col] if desc_col else None
@@ -281,6 +281,7 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     df_out["accounttype"] = None
 
     return df_out
+
 
 
 
