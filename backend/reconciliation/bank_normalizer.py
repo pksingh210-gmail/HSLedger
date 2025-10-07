@@ -152,95 +152,131 @@ def clean_amount(value):
 
 
 # ------------------------
+# Detect Debit/Credit Helper
+# ------------------------
+def detect_debit_credit(df):
+    """
+    Detects which numeric column is debit and which is credit.
+    If one column has both positive and negative values, it is treated as both.
+    """
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    debit_col = None
+    credit_col = None
+
+    for col in numeric_cols:
+        sample = df[col].dropna().head(10)
+        if sample.empty:
+            continue
+        if (sample < 0).any() and (sample > 0).any():
+            debit_col = col
+            credit_col = col
+            break
+        elif (sample < 0).any():
+            debit_col = col
+        elif (sample > 0).any():
+            credit_col = col
+
+    return debit_col, credit_col
+
+
+# ------------------------
 # Normalizer Function
 # ------------------------
 def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str) -> pd.DataFrame:
-    """
-    Normalize any bank CSV into canonical schema.
-    """
+    # -----------------------
+    # Preprocess unknown / tab-delimited files
+    # -----------------------
+    if df is not None and not df.empty:
+        # If df has generic integer columns, assume no headers
+        if all(isinstance(c, int) for c in df.columns):
+            # Assign default headers that match normaliser preset
+            default_cols = ["Date", "Amount", "Description", "Balance"]
+            if df.shape[1] >= 4:
+                df = df.iloc[:, :4]  # Only take first 4 columns
+                df.columns = default_cols
+            else:
+                # Fill missing columns with None
+                cols = list(df.columns)
+                df.columns = cols + default_cols[len(cols):]
+            logger.info(f"Preprocessed file: Added headers {df.columns.tolist()}")
 
+        # Ensure numeric columns are properly typed
+        for col in ["Amount", "Balance"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # -----------------------
+    # Existing normalization logic
+    # -----------------------
     if df is None or df.empty:
         return pd.DataFrame(columns=[
-            "transactionid", "date", "bsb", "accountnumber", "description",
-            "debit", "credit", "balance", "type", "reference", "bank_name", "accounttype"
+            "transactionid","date","bsb","accountnumber","description",
+            "debit","credit","balance","type","reference","bank","accounttype"
         ])
 
     df_local = df.copy()
     df_local.columns = [c.strip() for c in df_local.columns]
-
-    # Log columns for debugging
     logger.info(f"Bank: {bank_name}, Available columns: {df_local.columns.tolist()}")
 
     preset = BANK_PRESETS.get(bank_name.strip().title()) or BANK_PRESETS.get(bank_name.strip().upper())
 
-    if preset:
-        logger.info(f"Using preset mapping for {bank_name}")
-        date_col = _match_column_case_insensitive(df_local, preset.get("date"))
-        desc_col = _match_column_case_insensitive(df_local, preset.get("description"))
-        debit_col = _match_column_case_insensitive(df_local, preset.get("debit"))
-        credit_col = _match_column_case_insensitive(df_local, preset.get("credit"))
-        amount_col = _match_column_case_insensitive(df_local, preset.get("amount"))
-        balance_col = _match_column_case_insensitive(df_local, preset.get("balance"))
+    date_col = _match_column_case_insensitive(df_local, preset.get("date") if preset else None)
+    desc_col = _match_column_case_insensitive(df_local, preset.get("description") if preset else None)
+    debit_col = _match_column_case_insensitive(df_local, preset.get("debit") if preset else None)
+    credit_col = _match_column_case_insensitive(df_local, preset.get("credit") if preset else None)
+    amount_col = _match_column_case_insensitive(df_local, preset.get("amount") if preset else None)
+    balance_col = _match_column_case_insensitive(df_local, preset.get("balance") if preset else None)
 
-        # Fallback if preset not found
-        if not date_col:
-            logger.warning(f"Preset date column not found. Falling back.")
-            date_col = _find_column(df_local, ["date", "txn_date", "value_date"])
-        if not desc_col:
-            desc_col = _find_column(df_local, ["description", "details", "narrative", "memo"])
+    if not date_col:
+        date_col = _find_column(df_local, ["date", "txn_date", "value_date"])
+    if not desc_col:
+        desc_col = _find_column(df_local, ["description", "details", "narrative", "memo"])
+    if not debit_col or not credit_col:
+        detected_debit, detected_credit = detect_debit_credit(df_local)
+        debit_col = debit_col or detected_debit
+        credit_col = credit_col or detected_credit
         if not debit_col:
             debit_col = _find_column(df_local, ["debit", "withdrawal", "money out"])
         if not credit_col:
             credit_col = _find_column(df_local, ["credit", "deposit", "money in"])
-        if not amount_col:
-            amount_col = _find_column(df_local, ["amount", "transaction amount", "value"])
-        if not balance_col:
-            balance_col = _find_column(df_local, ["balance", "running balance"])
-
-    else:
-        logger.info(f"Falling back to heuristic mapping for {bank_name}")
-        date_col = _find_column(df_local, ["date", "txn_date", "value_date"])
-        desc_col = _find_column(df_local, ["description", "details", "narrative", "memo"])
-        debit_col = _find_column(df_local, ["debit", "withdrawal", "money out"])
-        credit_col = _find_column(df_local, ["credit", "deposit", "money in"])
+    if not amount_col and not (debit_col and credit_col):
         amount_col = _find_column(df_local, ["amount", "transaction amount", "value"])
+    if not balance_col:
         balance_col = _find_column(df_local, ["balance", "running balance"])
 
-    # --- Build normalized DataFrame ---
+    # Fallback: use any numeric column if all missing
+    if not any([debit_col, credit_col, amount_col]):
+        numeric_cols = df_local.select_dtypes(include=["number"]).columns
+        if len(numeric_cols) == 1:
+            amount_col = numeric_cols[0]
+
     df_out = pd.DataFrame()
     df_out["transactionid"] = df_local.index.astype(str)
-
-    # Dates
-    if date_col:
-        df_out["date"] = df_local[date_col].apply(lambda x: parsedate(x))
-    else:
-        df_out["date"] = None
-
+    df_out["date"] = df_local[date_col].apply(parsedate) if date_col else None
     df_out["bsb"] = None
     df_out["accountnumber"] = account_number
     df_out["description"] = df_local[desc_col] if desc_col else None
 
-    # Debit / Credit / Amount (with cleaning)
-    if debit_col and credit_col:
+    # Debit / Credit / Amount
+    if debit_col and credit_col and debit_col != credit_col:
         df_out["debit"] = df_local[debit_col].apply(clean_amount)
         df_out["credit"] = df_local[credit_col].apply(clean_amount)
     elif amount_col:
         df_out["amount"] = df_local[amount_col].apply(clean_amount)
         df_out["debit"] = df_out["amount"].apply(lambda x: abs(x) if x < 0 else 0)
         df_out["credit"] = df_out["amount"].apply(lambda x: x if x > 0 else 0)
+    elif debit_col and credit_col and debit_col == credit_col:
+        df_out["debit"] = df_local[debit_col].apply(lambda x: abs(clean_amount(x)) if clean_amount(x) < 0 else 0)
+        df_out["credit"] = df_local[credit_col].apply(lambda x: clean_amount(x) if clean_amount(x) > 0 else 0)
     else:
         df_out["debit"], df_out["credit"] = 0, 0
 
-    # Balance
-    if balance_col:
-        df_out["balance"] = df_local[balance_col].apply(clean_amount)
-    else:
-        df_out["balance"] = None
-
-    # Metadata
+    df_out["balance"] = df_local[balance_col].apply(clean_amount) if balance_col else None
     df_out["type"] = None
     df_out["reference"] = None
     df_out["bank"] = bank_name
     df_out["accounttype"] = None
 
     return df_out
+
+
