@@ -157,8 +157,9 @@ def auth_ui():
                 if st.button("Logout", key="logout_btn"):
                     st.session_state.logged_in = False
                     st.session_state.user = {}
-                    cookie_manager.delete("auth_email")
-                    cookie_manager.delete("auth_password")
+                    if "auth_email" in cookie_manager.cookies:
+                        cookie_manager.delete("auth_email")
+                        cookie_manager.delete("auth_password")
                     st.rerun()
 
             admin_panel()
@@ -176,6 +177,7 @@ def auth_ui():
         signup_tab()
     
     return False  # Not admin
+
 
 
 
