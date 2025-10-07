@@ -8,15 +8,14 @@ frontend_dir = current_dir
 if frontend_dir not in sys.path:
     sys.path.append(frontend_dir)
 
-# --- Import components ---
-from frontend.components import navbar, reconciliation_ui, trading_ui
-
 # --- Auth module path ---
 auth_dir = os.path.join(current_dir, "Auth")
 if auth_dir not in sys.path:
     sys.path.append(auth_dir)
 
+# --- Import components ---
 from auth.auth_json_module import auth_ui
+from frontend.components import navbar, reconciliation_ui, trading_ui
 
 # --- Streamlit config ---
 st.set_page_config(page_title="HSLedger", layout="wide")
@@ -57,6 +56,16 @@ if not st.session_state.get("logged_in", False):
     auth_ui()
     st.stop()
 
+# ==================================================
+# ✅ Sidebar Logout Button
+# ==================================================
+with st.sidebar:
+    #st.markdown("### Account")
+    if st.button("🚪Logout", use_container_width=True):
+        st.session_state.logout_request = True
+        st.rerun()
+# ==================================================
+
 # --- Navigation ---
 tab = navbar.render_navbar()
 
@@ -70,4 +79,3 @@ else:
         Navigate using the top menu to Reconciliation or Trading.
         """
     )
-
