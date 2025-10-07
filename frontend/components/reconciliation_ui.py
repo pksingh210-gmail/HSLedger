@@ -105,7 +105,7 @@ def render():
 
     with btn_col4:  # Extreme right column for Reset
         if st.button("🔄 Reset", disabled=st.session_state.reconciliation_results is None):
-            keys_to_clear = ["reconciliation_results", "page_number", "page_size", "accounts_ready", "selected_accounts", "other_reconciliation_data"]
+            keys_to_clear = ["reconciliation_results", "page_number", "page_size", "accounts"]
             for key in keys_to_clear:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -211,4 +211,5 @@ def render():
             file_name="reconciliation_results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
