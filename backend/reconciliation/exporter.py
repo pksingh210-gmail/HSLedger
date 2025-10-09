@@ -1,8 +1,9 @@
+# backend/reconciliation/exporter.py
+
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font
 from io import BytesIO
-
 
 def export_report(all_tx: pd.DataFrame) -> BytesIO:
     """
@@ -12,7 +13,9 @@ def export_report(all_tx: pd.DataFrame) -> BytesIO:
 
     # --- Ensure required columns ---
     required_cols = [
-        "Date", "TransactionID", "Description","Debit", "Credit", "Bank", "Account", "Classification", "PairID"
+        "Date", "TransactionID", "Description", "Debit", "Credit",
+        "Bank", "Account", "Classification", "PairID",
+        "GL Account", "GST", "Who"
     ]
     for col in required_cols:
         if col not in all_tx.columns:
@@ -21,11 +24,12 @@ def export_report(all_tx: pd.DataFrame) -> BytesIO:
     # Ensure numeric for summary
     all_tx["Debit"] = pd.to_numeric(all_tx["Debit"], errors="coerce").fillna(0.0)
     all_tx["Credit"] = pd.to_numeric(all_tx["Credit"], errors="coerce").fillna(0.0)
+    all_tx["GST"] = pd.to_numeric(all_tx.get("GST", 0), errors="coerce").fillna(0.0)
 
-    # Convert Period columns to string (for Excel compatibility)
-    for col in all_tx.columns:
-        if pd.api.types.is_period_dtype(all_tx[col]):
-            all_tx[col] = all_tx[col].astype(str)
+    # --- Pull month and year straight from normalizer date ---
+    if "Date" in all_tx.columns:
+        all_tx["Month"] = all_tx["Date"].apply(lambda x: x.month if hasattr(x, "month") else None)
+        all_tx["Year"] = all_tx["Date"].apply(lambda x: x.year if hasattr(x, "year") else None)
 
     # --- Create workbook ---
     wb = Workbook()
@@ -40,24 +44,26 @@ def export_report(all_tx: pd.DataFrame) -> BytesIO:
     # --- Monthly Summary Sheet ---
     ws2 = wb.create_sheet("Monthly Summary")
 
-    if "Date" in all_tx.columns and not all_tx["Date"].isna().all():
-        all_tx["Date"] = pd.to_datetime(all_tx["Date"], errors="coerce")
-        all_tx["Month"] = all_tx["Date"].dt.to_period("M")
-
+    if "Month" in all_tx.columns and not all_tx["Month"].isna().all():
         monthly_summary = []
         for month, group in all_tx.groupby("Month"):
             internal_count = (group["Classification"] == "Internal").sum()
-            incoming_count = (group["Classification"] == "External Incoming").sum()
-            outgoing_count = (group["Classification"] == "External Outgoing").sum()
-            total_income = group.loc[group["Classification"] == "External Incoming", "Credit"].sum()
-            total_expense = group.loc[group["Classification"] == "External Outgoing", "Debit"].sum()
-
+            incoming_count = (group["Classification"] == "Incoming").sum()
+            outgoing_count = (group["Classification"] == "Outgoing").sum()
+            total_income = group.loc[group["Classification"] == "Incoming", "Credit"].sum()
+            total_expense = group.loc[group["Classification"] == "Outgoing", "Debit"].sum()
+            total_incoming_gst = group.loc[group["Classification"] == "Incoming", "GST"].sum()
+            total_outgoing_gst = group.loc[group["Classification"] == "Outgoing", "GST"].sum()
             monthly_summary.append([
-                str(month), internal_count, incoming_count, outgoing_count, total_income, total_expense
+                month, internal_count, incoming_count, outgoing_count,
+                total_income, total_expense, total_incoming_gst, total_outgoing_gst
             ])
 
-        ws2.append(["Month", "Internal Transfers", "External Incoming Count",
-                    "External Outgoing Count", "Total Incoming Income", "Total Outgoing Expense"])
+        ws2.append([
+            "Month", "Internal Transfers", "Incoming Count",
+            "Outgoing Count", "Total Incoming Income",
+            "Total Outgoing Expense", "Total Incoming GST", "Total Outgoing GST"
+        ])
         for row in monthly_summary:
             ws2.append(row)
 
@@ -67,15 +73,12 @@ def export_report(all_tx: pd.DataFrame) -> BytesIO:
         grand_outgoing = sum(r[3] for r in monthly_summary)
         grand_income = sum(r[4] for r in monthly_summary)
         grand_expense = sum(r[5] for r in monthly_summary)
+        grand_incoming_gst = sum(r[6] for r in monthly_summary)
+        grand_outgoing_gst = sum(r[7] for r in monthly_summary)
 
         ws2.append([
-            "Grand Total",
-            grand_internal,
-            grand_incoming,
-            grand_outgoing,
-            grand_income,
-            grand_expense
-        ])
+            "Grand Total", grand_internal, grand_incoming, grand_outgoing,
+            grand_income, grand_expense, grand_incoming_gst, grand_outgoing_gst        ])
 
         # Highlight Grand Total row
         total_row = ws2.max_row
@@ -86,20 +89,18 @@ def export_report(all_tx: pd.DataFrame) -> BytesIO:
 
     # --- Formatting Reconciliation sheet ---
     fill_internal = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    fill_external = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
-    fill_unclassified = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
-    bold_red = Font(bold=True, color="9C0006")
+    fill_incoming = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+    fill_outgoing = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
 
     class_col = list(all_tx.columns).index("Classification") + 1
     for row in range(2, ws1.max_row + 1):
         cls = ws1.cell(row=row, column=class_col).value
         if cls == "Internal":
             ws1.cell(row=row, column=class_col).fill = fill_internal
-        elif cls in ("External Outgoing", "External Incoming"):
-            ws1.cell(row=row, column=class_col).fill = fill_external
-        elif cls == "Unclassified":
-            ws1.cell(row=row, column=class_col).fill = fill_unclassified
-            ws1.cell(row=row, column=class_col).font = bold_red
+        elif cls in ("Outgoing"):
+            ws1.cell(row=row, column=class_col).fill = fill_outgoing
+        elif cls in ("Incoming"):
+            ws1.cell(row=row, column=class_col).fill = fill_incoming
 
     # --- Save to BytesIO ---
     output = BytesIO()
