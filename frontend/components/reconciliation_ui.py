@@ -1,6 +1,9 @@
+# frontend/components/reconciliation_ui.py
+
 import streamlit as st 
 import pandas as pd
 from backend.reconciliation import reconcile_service, exporter
+from backend.reconciliation.bank_normalizer import normalize_transactions, BANK_PRESETS
 from backend.utils.logger import logger
 
 def render():
@@ -18,6 +21,8 @@ def render():
         st.session_state.page_number = 1
     if "page_size" not in st.session_state:
         st.session_state.page_size = 50
+    if "show_gst" not in st.session_state:
+        st.session_state.show_gst = True  # GST toggle default ON
 
     # Remove top padding
     st.markdown("""
@@ -42,7 +47,14 @@ def render():
         )
         form_key = f"add_account_form_{st.session_state.file_uploader_key}"
         with st.form(key=form_key):
-            bank_name = st.text_input("Bank Name", key=f"bank_name_input_{st.session_state.file_uploader_key}")
+            # --- Bank Name Dropdown (Alphabetically Sorted) ---
+            sorted_banks = [""] + sorted(BANK_PRESETS.keys())
+            bank_name = st.selectbox(
+                "Bank Name",
+                options=sorted_banks,
+                index=0,  # Default to blank
+                key=f"bank_name_input_{st.session_state.file_uploader_key}"
+            )
             account_number = st.text_input("Account Number", key=f"account_number_input_{st.session_state.file_uploader_key}")
             uploaded_files = st.file_uploader(
                 "Upload CSV(s) for this account",
@@ -76,11 +88,11 @@ def render():
         else:
             st.info("No accounts added yet.")
 
-    # --- Run Agent and Reset Buttons on the same row ---
+    # --- Run Agent and Reset Buttons ---
     st.markdown("<hr style='margin-top:5px; margin-bottom:5px;'>", unsafe_allow_html=True)
     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([3, 2, 2, 1])
     with btn_col2:  # Center column for Run Agent
-        if st.button("🚀 Run Agent", disabled=len(st.session_state.accounts) == 0):
+        if st.button("🚀Run Agent", disabled=len(st.session_state.accounts) == 0):
             file_entries = []
             for acc in st.session_state.accounts:
                 for f in acc["files"]:
@@ -90,7 +102,6 @@ def render():
                         "file": f
                     })
 
-            # Temporary progress message
             status_placeholder = st.empty()
             status_placeholder.info("Matching in progress ⏳")
             result_df = reconcile_service.process_files(file_entries)
@@ -104,69 +115,100 @@ def render():
                 st.session_state.page_number = 1
 
     with btn_col4:  # Extreme right column for Reset
-        if st.button("🔄 Reset", disabled=st.session_state.reconciliation_results is None):
+        if st.button("🔄Reset", disabled=st.session_state.reconciliation_results is None):
             keys_to_clear = ["reconciliation_results", "page_number", "page_size", "accounts"]
             for key in keys_to_clear:
                 if key in st.session_state:
                     del st.session_state[key]
-            st.rerun()  # Refresh the page
+            st.rerun()
 
     # --- Display Results ---
     if st.session_state.reconciliation_results is not None:
         st.subheader("🔎Reconciliation Results")
         df_total = st.session_state.reconciliation_results.copy()
 
+        # Toggle GST column visibility
+        if not st.session_state.show_gst and "GST" in df_total.columns:
+            df_total = df_total.drop(columns=["GST"])
+
         # --- Monthly Summary ---
         if "Date" in df_total.columns and not df_total["Date"].isna().all():
-            df_total["Date"] = pd.to_datetime(df_total["Date"], errors="coerce")
-            df_total["Month"] = df_total["Date"].dt.to_period("M")
+            # Convert Date column to datetime
+            df_total["Date"] = pd.to_datetime(df_total["Date"], errors='coerce', dayfirst=True)
+
+            # Extract Month and Year
+            df_total["Month"] = df_total["Date"].dt.month
+            df_total["Year"] = df_total["Date"].dt.year
+
+            # 2️⃣ Convert back to original string format for display
+            df_total["Date"] = df_total["Date"].dt.strftime("%d/%m/%Y")
 
             monthly_summary = []
-            for month, group in df_total.groupby("Month"):
+            for (year, month), group in df_total.groupby(["Year", "Month"]):
                 internal_count = (group["Classification"] == "Internal").sum()
-                incoming_count = (group["Classification"] == "External Incoming").sum()
-                outgoing_count = (group["Classification"] == "External Outgoing").sum()
-                total_income = group.loc[group["Classification"] == "External Incoming", "Credit"].sum()
-                total_expense = group.loc[group["Classification"] == "External Outgoing", "Debit"].sum()
+                incoming_count = (group["Classification"] == "Incoming").sum()
+                outgoing_count = (group["Classification"] == "Outgoing").sum()
+                total_income = group.loc[group["Classification"] == "Incoming", "Credit"].sum()
+                total_expense = group.loc[group["Classification"] == "Outgoing", "Debit"].sum()
+                total_incoming_gst = group.loc[group["Classification"] == "Incoming", "GST"].sum()
+                total_outgoing_gst = group.loc[group["Classification"] == "Outgoing", "GST"].sum()
+
+                # Format first column as "YYYY/MM" string
+                year_month_str = f"{year}/{month:02d}"
+
                 monthly_summary.append([
-                    str(month), internal_count, incoming_count, outgoing_count, total_income, total_expense
+                    year_month_str, internal_count, incoming_count, outgoing_count, total_income, total_expense, total_incoming_gst, total_outgoing_gst
                 ])
 
             summary_df = pd.DataFrame(
                 monthly_summary,
                 columns=[
-                    "Month",
+                    "Year/Month",
                     "Internal Transfers",
-                    "External Incoming Count",
-                    "External Outgoing Count",
+                    "Incoming Count",
+                    "Outgoing Count",
                     "Total Incoming Income",
-                    "Total Outgoing Expense"
+                    "Total Outgoing Expense",
+                    "Total Incoming GST",
+                    "Total Outgoing GST"
                 ]
             )
 
             totals = pd.DataFrame([[
                 "Grand Total",
                 summary_df["Internal Transfers"].sum(),
-                summary_df["External Incoming Count"].sum(),
-                summary_df["External Outgoing Count"].sum(),
+                summary_df["Incoming Count"].sum(),
+                summary_df["Outgoing Count"].sum(),
                 summary_df["Total Incoming Income"].sum(),
-                summary_df["Total Outgoing Expense"].sum()
+                summary_df["Total Outgoing Expense"].sum(),
+                summary_df["Total Incoming GST"].sum(),
+                summary_df["Total Outgoing GST"].sum()
             ]], columns=summary_df.columns)
 
             summary_df = pd.concat([summary_df, totals], ignore_index=True)
 
+            # --- ROUND DECIMALS HERE ---
+            for col in ["Total Incoming Income", "Total Outgoing Expense", "Total Incoming GST", "Total Outgoing GST"]:
+                if col in summary_df.columns:
+                    summary_df[col] = summary_df[col].map(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+
             def highlight_total(row):
-                if row["Month"] == "Grand Total":
+                if row["Year/Month"] == "Grand Total":
                     return ["background-color: #fff3cd; font-weight: bold"] * len(row)
                 return [""] * len(row)
 
-            with st.expander("📊 Monthly Summary", expanded=False):
+            with st.expander("📊Monthly Summary", expanded=False):
                 st.dataframe(summary_df.style.apply(highlight_total, axis=1))
 
         # --- Detailed Table ---
-        #st.markdown("##### 📄 Transaction Details")
-        key_columns = ["Date", "TransactionID", "Description", "Debit", "Credit", "Bank", "Account", "Classification", "PairID"]
+        key_columns = ["Date", "TransactionID", "Description", "Debit", "Credit",
+                       "Bank", "Account", "Classification", "PairID", "GL Account", "GST", "Who"]
         df_display = df_total[[col for col in key_columns if col in df_total.columns]].copy()
+
+        # Round numeric columns to 2 decimals for display
+        for col in ["Debit", "Credit", "GST"]:
+            if col in df_display.columns:
+                df_display[col] = df_display[col].map(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
 
         total_rows = len(df_display)
         total_pages = (total_rows // st.session_state.page_size) + (1 if total_rows % st.session_state.page_size > 0 else 0)
@@ -178,16 +220,16 @@ def render():
             cls = row.get("Classification", "")
             if cls == "Internal":
                 return ["background-color: #d4f7dc"] * len(row)
-            elif cls == "External Incoming":
+            elif cls == "Incoming":
                 return ["background-color: #e8f3ff"] * len(row)
-            elif cls == "External Outgoing":
+            elif cls == "Outgoing":
                 return ["background-color: #fff3cd"] * len(row)
             return [""] * len(row)
 
         styled_df = df_page.style.apply(color_row, axis=1)\
                                  .set_table_styles([{'selector': 'th', 'props': [('font-weight', 'bold')]}])
 
-        with st.expander("📄 Transaction Details", expanded=False):
+        with st.expander("📄Transaction Details", expanded=False):
             st.dataframe(styled_df)
 
             # --- Pagination buttons ---
@@ -211,5 +253,3 @@ def render():
             file_name="reconciliation_results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-
