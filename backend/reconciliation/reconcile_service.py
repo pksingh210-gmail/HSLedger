@@ -1,4 +1,5 @@
 # backend/reconciliation/reconcile_service.py
+# backend/reconciliation/reconcile_service.py
 
 from typing import List, Dict
 import pandas as pd
@@ -6,11 +7,12 @@ from backend.reconciliation.bank_normalizer import normalize_transactions
 from backend.reconciliation import classifier
 from backend.utils.file_utils import load_csv, validate_file
 from backend.utils.logger import logger
+import streamlit as st
 
 def process_files(file_entries: List[Dict], show_progress=True) -> pd.DataFrame:
     """
     Load, normalize, and classify transactions from multiple uploaded files.
-    Returns a single concatenated and classified DataFrame.
+    Returns a single concatenated and classified DataFrame with GST toggle support.
     """
     normalized_list = []
 
@@ -40,15 +42,17 @@ def process_files(file_entries: List[Dict], show_progress=True) -> pd.DataFrame:
     # Ensure column names lowercase for classifier
     combined.columns = combined.columns.str.strip().str.lower()
 
-    # Classify transactions directly
+    # Classify transactions with internal/external + GST toggle
     classified = classifier.classify_transactions(combined, show_progress=show_progress)
 
     # Sort by Date descending if present
-    if "Date" in classified.columns:
-        classified = classified.sort_values(by="Date", ascending=False).reset_index(drop=True)
+    if "date" in classified.columns:
+        classified = classified.sort_values(by="date", ascending=False).reset_index(drop=True)
     else:
         classified = classified.reset_index(drop=True)
 
     return classified
+
+
 
 
