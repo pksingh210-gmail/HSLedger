@@ -1,7 +1,5 @@
 # backend/reconciliation/reconcile_service.py
 
-# backend/reconciliation/reconcile_service.py
-
 from typing import List, Dict
 import pandas as pd
 from backend.reconciliation.bank_normalizer import normalize_transactions
@@ -47,3 +45,4 @@ def process_files(file_entries: List[Dict], show_progress=True) -> pd.DataFrame:
     classified = classifier.classify_transactions(combined, show_progress=show_progress)
 
     return classified
+
