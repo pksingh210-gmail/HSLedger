@@ -1,10 +1,9 @@
 import pandas as pd
 import itertools
 import streamlit as st
+from .gst_calculator import calculate_gst  # Import GST function
 
-# Australian GST rate
-GST_RATE = 0.10
-
+# --- Transaction classifier ---
 def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
     df.columns = df.columns.str.strip().str.lower()
     df = df.reset_index(drop=True)
@@ -12,10 +11,6 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
     # Ensure numeric with zero fallback
     df["debit"] = pd.to_numeric(df.get("debit", 0), errors="coerce").fillna(0)
     df["credit"] = pd.to_numeric(df.get("credit", 0), errors="coerce").fillna(0)
-
-    # --- Do NOT modify date --- keep as received from normalizer
-    # if "date" in df.columns:
-    #     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
 
     # Description-based adjustment
     def desc_based_adjust(row):
@@ -32,10 +27,9 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
         return row
 
     df = df.apply(desc_based_adjust, axis=1)
-
     df["tmp_idx"] = df.index
 
-    # Include all non-zero debits/credits
+    # Prepare debit and credit DataFrames for internal transfer matching
     debit_df = df[df["debit"] != 0][["tmp_idx", "date", "debit", "bank", "account"]].copy()
     credit_df = df[df["credit"] != 0][["tmp_idx", "date", "credit", "bank", "account"]].copy()
 
@@ -48,20 +42,17 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
         "bank": "bank_credit", "account": "account_credit"
     })
 
-    # Outer merge on amount to find possible internal transfers
     merged = pd.merge(
         debit_df, credit_df,
         on="amount", how="outer", indicator=True
     )
 
-    # --- Keep original dates from normalizer ---
-    # merged["date_debit"] = pd.to_datetime(merged.get("date_debit"), errors="coerce").dt.date
-    # merged["date_credit"] = pd.to_datetime(merged.get("date_credit"), errors="coerce").dt.date
-
+    # Initialize classification columns
     df["classification"] = None
     df["pairid"] = None
     df["GL Account"] = None
     df["GST"] = 0.0
+    df["GST Category"] = None
     df["Who"] = None
 
     pair_id_counter = itertools.count(1)
@@ -77,17 +68,14 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
             continue
         if pd.isna(d_idx) or pd.isna(c_idx):
             continue
-
-        # --- Only allow internal transfer if accounts are different ---
         account_debit = getattr(row, "account_debit", None)
         account_credit = getattr(row, "account_credit", None)
         if account_debit == account_credit:
-            continue  # skip internal transfer within the same account
+            continue  # skip internal transfer within same account
 
-        # Treat as internal transfer across accounts
         pid = f"PAIR{next(pair_id_counter):05d}"
-        df.loc[int(d_idx), ["classification", "pairid"]] = ["Internal", pid]
-        df.loc[int(c_idx), ["classification", "pairid"]] = ["Internal", pid]
+        df.loc[int(d_idx), ["classification", "pairid"]] = ["🟢Internal", pid]
+        df.loc[int(c_idx), ["classification", "pairid"]] = ["🟢Internal", pid]
         matched_debits.add(int(d_idx))
         matched_credits.add(int(c_idx))
 
@@ -99,48 +87,16 @@ def classify_transactions(df: pd.DataFrame, show_progress=True) -> pd.DataFrame:
 
     # External classification
     mask_unclassified = df["classification"].isna()
-    df.loc[mask_unclassified & (df["debit"] > 0), "classification"] = "Outgoing"
-    df.loc[mask_unclassified & (df["credit"] > 0), "classification"] = "Incoming"
-    df["classification"] = df["classification"].fillna("Unclassified")
+    df.loc[mask_unclassified & (df["debit"] > 0), "classification"] = "🟡Outgoing"
+    df.loc[mask_unclassified & (df["credit"] > 0), "classification"] = "🔵Incoming"
+    df["classification"] = df["classification"].fillna("⚪Unclassified")
 
-    # GST calculation for external transactions (GST-inclusive)
-    def calculate_gst_inclusive(row):
-        if row["classification"] in ["Incoming", "Outgoing"]:
-            if row["classification"] == "Outgoing":
-                return round(row["debit"] * GST_RATE / (1 + GST_RATE), 2)
-            if row["classification"] == "Incoming":
-                return round(row["credit"] * GST_RATE / (1 + GST_RATE), 2)
-        return 0.0
-
-    df["GST"] = df.apply(calculate_gst_inclusive, axis=1)
-
-    # --- Pull month/year straight from normalizer date ---
+    # Pull month/year from date without changing type
     if "date" in df.columns:
         df["Month"] = df["date"].apply(lambda x: x.month if hasattr(x, "month") else None)
         df["Year"] = df["date"].apply(lambda x: x.year if hasattr(x, "year") else None)
 
-    required_final = [
-        "date", "bank", "account", "description", "debit", "credit",
-        "classification", "pairid", "GL Account", "GST", "Who"
-    ]
-    for col in required_final:
-        if col not in df.columns:
-            df[col] = None
-    df = df[required_final]
-
-    rename_map = {
-        "date": "Date",
-        "description": "Description",
-        "bank": "Bank",
-        "account": "Account",
-        "debit": "Debit",
-        "credit": "Credit",
-        "classification": "Classification",
-        "pairid": "PairID",
-        "GL Account": "GL Account",
-        "GST": "GST",
-        "Who": "Who"
-    }
-    df = df.rename(columns=rename_map)
+    # --- Call external GST calculator ---
+    df = calculate_gst(df)
 
     return df
