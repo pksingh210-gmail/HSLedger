@@ -100,16 +100,11 @@ DEBIT_KEYWORDS = ["transfer to", "payment", "withdrawal", "purchase", "card", "b
 CREDIT_KEYWORDS = ["credit", "salary", "fast transfer from", "refund", "transfer from"]
 
 def classify_amount(amount, description=None):
-    """
-    Classify a numeric amount into debit or credit.
-    Use the sign first; if ambiguous, fall back to description keywords.
-    """
     if amount > 0:
-        return 0.0, amount   # positive → credit
+        return 0.0, amount
     elif amount < 0:
-        return abs(amount), 0.0  # negative → debit
+        return abs(amount), 0.0
     else:
-        # fallback to description only if amount is 0 or ambiguous
         if description:
             desc = str(description).lower()
             if any(k in desc for k in DEBIT_KEYWORDS):
@@ -124,7 +119,7 @@ def classify_amount(amount, description=None):
 def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=[
-            "date","bank","account","description","debit","credit"
+            "Date","Bank","Account","Description","Debit","Credit"
         ])
 
     df_local = df.copy()
@@ -155,7 +150,6 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     if not amount_col and not (debit_col and credit_col):
         amount_col = _find_column(df_local, ["amount", "transaction amount", "value"])
 
-    # Prevent balance being treated as amount/debit/credit
     if balance_col:
         if amount_col == balance_col:
             amount_col = None
@@ -166,9 +160,6 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
 
     df_out = pd.DataFrame()
 
-    # ------------------------
-    # Robust date parsing (updated section)
-    # ------------------------
     if date_col:
         df_local[date_col] = df_local[date_col].astype(str).str.strip().str.replace("\ufeff", "")
         df_out["date"] = pd.to_datetime(
@@ -184,7 +175,6 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
     df_out["account"] = account_number
     df_out["description"] = df_local[desc_col] if desc_col else None
 
-    # Debit / Credit / Amount
     if debit_col and credit_col and debit_col != credit_col:
         df_out["debit"] = df_local[debit_col].apply(lambda x: max(clean_amount(x),0))
         df_out["credit"] = df_local[credit_col].apply(lambda x: max(clean_amount(x),0))
@@ -202,10 +192,4 @@ def normalize_transactions(df: pd.DataFrame, bank_name: str, account_number: str
         df_out["debit"], df_out["credit"] = 0,0
 
     logger.info(f"✅ Normalized {len(df_out)} rows for {bank_name} | Account {account_number}")
-    return df_out[["date","bank","account","description","debit","credit"]]
-
-
-
-
-
-
+    return df_out
