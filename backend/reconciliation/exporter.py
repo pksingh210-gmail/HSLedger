@@ -1,6 +1,4 @@
 # backend/reconciliation/exporter.py
-
-# backend/reconciliation/exporter.py
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font
@@ -56,4 +54,3 @@ def export_excel_bytes(df_total: pd.DataFrame, monthly_summary: pd.DataFrame) ->
     wb.save(output)
     output.seek(0)
     return output
-
