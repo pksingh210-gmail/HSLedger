@@ -80,7 +80,7 @@ def render():
     if "page_number" not in st.session_state:
         st.session_state.page_number = 1
     if "page_size" not in st.session_state:
-        st.session_state.page_size = 10
+        st.session_state.page_size = 25
     if "show_gst" not in st.session_state:
         st.session_state.show_gst = True
     if "gst_calculated" not in st.session_state:
@@ -100,6 +100,12 @@ def render():
             st.session_state.current_session_id = None
     if "selected_rows" not in st.session_state:
         st.session_state.selected_rows = set()
+    if "filter_internal" not in st.session_state:
+        st.session_state.filter_internal = True
+    if "filter_incoming" not in st.session_state:
+        st.session_state.filter_incoming = True
+    if "filter_outgoing" not in st.session_state:
+        st.session_state.filter_outgoing = True
 
     st.markdown("""
         <style>
@@ -436,10 +442,73 @@ def render():
                 )
 
         with st.expander("📄Transaction Details", expanded=True):
-            # Status bar
-            pending_count = len(st.session_state.pending_changes)
-            status_msg = f"**💡 Status:** {pending_count} pending change(s) | Pages updated: {len(st.session_state.updated_pages)}/{total_pages} | Session: {st.session_state.current_session_id or 'New'}"
-            st.markdown(status_msg)
+            # Status bar and filters in same row
+            status_col1, status_col2 = st.columns([3, 1])
+            
+            with status_col1:
+                pending_count = len(st.session_state.pending_changes)
+                status_msg = f"**💡Status:** {pending_count} pending change(s) | Pages updated: {len(st.session_state.updated_pages)}/{total_pages} | Session: {st.session_state.current_session_id or 'New'}"
+                st.markdown(status_msg)
+            
+            with status_col2:
+                # Filter checkboxes on top right
+                filter_cols = st.columns(3)
+                with filter_cols[0]:
+                    st.session_state.filter_internal = st.checkbox("🟢", value=st.session_state.filter_internal, key=f"filter_internal_{st.session_state.page_number}")
+                with filter_cols[1]:
+                    st.session_state.filter_incoming = st.checkbox("🔵", value=st.session_state.filter_incoming, key=f"filter_incoming_{st.session_state.page_number}")
+                with filter_cols[2]:
+                    st.session_state.filter_outgoing = st.checkbox("🟡", value=st.session_state.filter_outgoing, key=f"filter_outgoing_{st.session_state.page_number}")
+            
+            # Apply filters to df_display before pagination
+            df_filtered = df_display.copy()
+            filter_conditions = []
+            
+            if st.session_state.filter_internal:
+                filter_conditions.append(df_filtered["Classification"] == "🟢Internal")
+            if st.session_state.filter_incoming:
+                filter_conditions.append(df_filtered["Classification"] == "🔵Incoming")
+            if st.session_state.filter_outgoing:
+                filter_conditions.append(df_filtered["Classification"] == "🟡Outgoing")
+            
+            # Apply combined filter
+            if filter_conditions:
+                combined_filter = filter_conditions[0]
+                for condition in filter_conditions[1:]:
+                    combined_filter = combined_filter | condition
+                df_filtered = df_filtered[combined_filter]
+            else:
+                # If no filters selected, show empty dataframe
+                df_filtered = df_filtered.iloc[0:0]
+            
+            # Recalculate pagination based on filtered data
+            total_rows_filtered = len(df_filtered)
+            total_pages_filtered = (total_rows_filtered // st.session_state.page_size) + (
+                1 if total_rows_filtered % st.session_state.page_size > 0 else 0
+            )
+            
+            # Ensure page number is within bounds
+            if st.session_state.page_number > total_pages_filtered and total_pages_filtered > 0:
+                st.session_state.page_number = total_pages_filtered
+            elif total_pages_filtered == 0:
+                st.session_state.page_number = 1
+            
+            start_idx_filtered = (st.session_state.page_number - 1) * st.session_state.page_size
+            end_idx_filtered = start_idx_filtered + st.session_state.page_size
+            df_page = df_filtered.iloc[start_idx_filtered:end_idx_filtered].copy()
+
+            # Apply ALL pending changes to the current page BEFORE displaying
+            for idx in df_page.index:
+                if idx in st.session_state.pending_changes:
+                    df_page.at[idx, "GST Category"] = st.session_state.pending_changes[idx]
+
+            # Prepare display with formatting for non-editable columns
+            df_page_display = df_page.copy()
+            for col in ["Debit", "Credit", "GST"]:
+                if col in df_page_display.columns:
+                    df_page_display[col] = df_page_display[col].map(
+                        lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+                    )
             
             # Delete selected rows button
             if len(st.session_state.selected_rows) > 0:
@@ -474,23 +543,22 @@ def render():
                     .table-header {
                         font-weight: bold;
                         background-color: #f0f2f6;
-                        padding: 8px 4px;
+                        padding: 1px 4px;
                         border-bottom: 2px solid #ddd;
-                        font-size: 11px;
+                        font-size: 12px;
                         text-align: center;
                     }
                     .table-cell {
-                        font-size: 11px;
+                        font-size: 12px;
                         padding: 4px 2px;
                     }
                     div[data-testid="stText"] > div {
-                        font-size: 11px !important;
+                        font-size: 12px !important;
                     }
                 </style>
             """, unsafe_allow_html=True)
             
             # Display table header
-            st.markdown("**Transaction Table:**")
             header_cols = st.columns([0.5, 1, 1, 1, 3, 1, 1, 1.5, 1, 1, 1, 1.5, 1])
             headers = ["☑", "Date", "Bank", "Account", "Description", "Debit", "Credit", 
                       "Classification", "PairID", "GL Account", "GST", "GST Category", "Who"]
@@ -526,10 +594,29 @@ def render():
                     st.markdown(f"<div class='table-cell'>{str(row_data.get('Bank', ''))}</div>", unsafe_allow_html=True)
                 with cols[3]:
                     st.markdown(f"<div class='table-cell'>{str(row_data.get('Account', ''))}</div>", unsafe_allow_html=True)
+
                 with cols[4]:
-                    desc = str(row_data.get("Description", ""))
-                    desc_short = desc[:40] + "..." if len(desc) > 40 else desc
-                    st.markdown(f"<div class='table-cell'>{desc_short}</div>", unsafe_allow_html=True)
+                    desc = str(row_data.get("Description", "")) \
+                        .replace('"', '&quot;') \
+                        .replace("'", "&apos;")
+
+                    st.markdown(
+                        f"""
+                        <div style="
+                            max-width: 250px;
+                            font-size: 11px;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                            cursor: pointer;
+                        " title="{desc}">
+                            {desc}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+
                 with cols[5]:
                     st.markdown(f"<div class='table-cell'>{str(row_data.get('Debit', ''))}</div>", unsafe_allow_html=True)
                 with cols[6]:
@@ -548,6 +635,20 @@ def render():
                     current_category = st.session_state.pending_changes.get(
                         original_idx,
                         df_page.at[original_idx, "GST Category"]
+                    )
+
+                # Apply CSS for font size
+                    st.markdown(
+                       """
+                       <style>
+                       div[data-baseweb="select"] > div > div > div {
+                          font-size: 12px;
+                          padding-top: 0px !important;
+                          height: 24px !important;  /* adjust height as needed */
+                       }
+                       </style>
+                       """,
+                       unsafe_allow_html=True
                     )
                     
                     new_category = st.selectbox(
@@ -580,10 +681,10 @@ def render():
                     st.rerun()
             
             with pag_col2:
-                st.markdown(f"<div style='text-align: center; padding-top: 8px;'>Page {st.session_state.page_number} of {total_pages}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align: center; padding-top: 8px;'>Page {st.session_state.page_number} of {total_pages_filtered}</div>", unsafe_allow_html=True)
             
             with pag_col3:
-                if st.button("Next ➡", key="next_page") and st.session_state.page_number < total_pages:
+                if st.button("Next ➡", key="next_page") and st.session_state.page_number < total_pages_filtered:
                     st.session_state.page_number += 1
                     # Save state before navigation
                     save_current_session()
@@ -653,3 +754,4 @@ def render():
         
         # Auto-save on any interaction
         save_current_session()
+
