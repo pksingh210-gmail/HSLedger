@@ -10,7 +10,7 @@ GST_CATEGORY_KEYWORDS = {
     "GST Free Sale": ["gst free", "exempt"],
     "GST on Purchase": ["purchase", "supplier"],
     "Input Taxed Sales": ["input taxed"],
-    "BAZ Excluded": ["baz excluded"],
+    "BAS Excluded": ["bas excluded"],
     "Interest Income": ["interest", "bank interest"],
     "Other Exempt Income": ["grant", "donation", "compensation"]
 }
@@ -21,7 +21,7 @@ GST_CATEGORY_OPTIONS = [
     "GST Free Sale",
     "GST on Purchase",
     "Input Taxed Sales",
-    "BAZ Excluded",
+    "BAS Excluded",
     "Interest Income",
     "Other Exempt Income",
     "Unknown"
@@ -40,10 +40,14 @@ def calculate_gst_value(debit: float, credit: float, gst_category: str) -> float
     Returns:
         Calculated GST value
     """
-    if gst_category == "GST on Sale" and debit > 0:
-        return round(debit * GST_RATE / (1 + GST_RATE), 2)
-    elif gst_category == "GST on Purchase" and credit > 0:
+    # Convert to float and handle None/NaN values
+    debit = float(debit) if pd.notnull(debit) else 0.0
+    credit = float(credit) if pd.notnull(credit) else 0.0
+    
+    if gst_category == "GST on Sale" and credit > 0:
         return round(credit * GST_RATE / (1 + GST_RATE), 2)
+    elif gst_category == "GST on Purchase" and debit > 0:
+        return round(debit * GST_RATE / (1 + GST_RATE), 2)
     elif gst_category == "Unknown":
         # Fallback standard GST calculation
         if debit > 0:
