@@ -380,6 +380,17 @@ def render():
                 )
 
             with st.expander("📊Monthly Summary", expanded=False):
+                # Add CSS for monthly summary table
+                st.markdown("""
+                    <style>
+                        div[data-testid="stDataFrame"] {
+                            font-size: 11px !important;
+                        }
+                        div[data-testid="stDataFrame"] table {
+                            font-size: 11px !important;
+                        }
+                    </style>
+                """, unsafe_allow_html=True)
                 st.dataframe(summary_df.style.apply(highlight_total, axis=1))
 
         # --- Detailed Table ---
@@ -469,11 +480,11 @@ def render():
                         text-align: center;
                     }
                     .table-cell {
-                        font-size: 10px;
+                        font-size: 11px;
                         padding: 4px 2px;
                     }
                     div[data-testid="stText"] > div {
-                        font-size: 10px !important;
+                        font-size: 11px !important;
                     }
                 </style>
             """, unsafe_allow_html=True)
