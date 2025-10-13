@@ -457,10 +457,38 @@ def render():
                     st.success(f"Deleted {len(st.session_state.selected_rows)} row(s)")
                     st.rerun()
             
-            # Display table with manual row-by-row editing
-            st.markdown("**Edit GST Categories:**")
+            # Add CSS for table styling
+            st.markdown("""
+                <style>
+                    .table-header {
+                        font-weight: bold;
+                        background-color: #f0f2f6;
+                        padding: 8px 4px;
+                        border-bottom: 2px solid #ddd;
+                        font-size: 11px;
+                        text-align: center;
+                    }
+                    .table-cell {
+                        font-size: 10px;
+                        padding: 4px 2px;
+                    }
+                    div[data-testid="stText"] > div {
+                        font-size: 10px !important;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
             
-            # Create a container for the table
+            # Display table header
+            st.markdown("**Transaction Table:**")
+            header_cols = st.columns([0.5, 1, 1, 1, 3, 1, 1, 1.5, 1, 1, 1, 1.5, 1])
+            headers = ["☑", "Date", "Bank", "Account", "Description", "Debit", "Credit", 
+                      "Classification", "PairID", "GL Account", "GST", "GST Category", "Who"]
+            
+            for col, header in zip(header_cols, headers):
+                with col:
+                    st.markdown(f"<div class='table-header'>{header}</div>", unsafe_allow_html=True)
+            
+            # Create a container for the table rows
             for display_idx, original_idx in enumerate(df_page.index):
                 row_data = df_page_display.iloc[display_idx]
                 
@@ -480,27 +508,29 @@ def render():
                     else:
                         st.session_state.selected_rows.discard(original_idx)
                 
-                # Display other columns as text
+                # Display other columns as text with smaller font
                 with cols[1]:
-                    st.text(str(row_data.get("Date", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Date', ''))}</div>", unsafe_allow_html=True)
                 with cols[2]:
-                    st.text(str(row_data.get("Bank", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Bank', ''))}</div>", unsafe_allow_html=True)
                 with cols[3]:
-                    st.text(str(row_data.get("Account", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Account', ''))}</div>", unsafe_allow_html=True)
                 with cols[4]:
-                    st.text(str(row_data.get("Description", ""))[:40] + "..." if len(str(row_data.get("Description", ""))) > 40 else str(row_data.get("Description", "")))
+                    desc = str(row_data.get("Description", ""))
+                    desc_short = desc[:40] + "..." if len(desc) > 40 else desc
+                    st.markdown(f"<div class='table-cell'>{desc_short}</div>", unsafe_allow_html=True)
                 with cols[5]:
-                    st.text(str(row_data.get("Debit", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Debit', ''))}</div>", unsafe_allow_html=True)
                 with cols[6]:
-                    st.text(str(row_data.get("Credit", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Credit', ''))}</div>", unsafe_allow_html=True)
                 with cols[7]:
-                    st.text(str(row_data.get("Classification", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Classification', ''))}</div>", unsafe_allow_html=True)
                 with cols[8]:
-                    st.text(str(row_data.get("PairID", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('PairID', ''))}</div>", unsafe_allow_html=True)
                 with cols[9]:
-                    st.text(str(row_data.get("GL Account", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('GL Account', ''))}</div>", unsafe_allow_html=True)
                 with cols[10]:
-                    st.text(str(row_data.get("GST", "")))
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('GST', ''))}</div>", unsafe_allow_html=True)
                 
                 # GST Category selectbox - editable
                 with cols[11]:
@@ -526,19 +556,7 @@ def render():
                 
                 # Who column
                 with cols[12]:
-                    st.text(str(row_data.get("Who", "")))
-            
-            # Add header row style with CSS
-            st.markdown("""
-                <style>
-                    .row-header {
-                        font-weight: bold;
-                        background-color: #f0f2f6;
-                        padding: 8px;
-                        border-bottom: 2px solid #ddd;
-                    }
-                </style>
-            """, unsafe_allow_html=True)
+                    st.markdown(f"<div class='table-cell'>{str(row_data.get('Who', ''))}</div>", unsafe_allow_html=True)
             
             # Pagination and Submit button
             pag_col1, pag_col2, pag_col3, pag_col4 = st.columns([1, 1, 1, 1])
